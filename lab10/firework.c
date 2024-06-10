@@ -3,15 +3,23 @@
 #include "stdlib.h"
 #include <stdio.h>
 
-#define MAX_PARTICLES 500
-#define INIT_VELOCITY_X 100
+#define MAX_PARTICLES1 15
+#define MAX_PARTICLES2 500
+#define PARTICLE_INTERVAL 0.05
+#define INIT_VELOCITY_X 50
 #define INIT_VELOCITY_Y 200
-
+#define TEXTSIZE 15
 #define PARTICLE_W 5
-#define PARTICLE_H 5
+#define PARTICLE_H 10
 
 struct MemoryPool* gMemoryPool = NULL;
+int particle_cnt = -1;
+struct Particle* object[MAX_PARTICLES1] = { 0 };
+Vec2d loc[MAX_PARTICLES1] = { 0 };
+float interval_check = 0;
 
+ExplosionState explosion;
+Vec2d explosion_loc;
 // Functions
 
 void Particle_InitializeRandom(Particle* obj, AliveOrFinish a)
@@ -49,14 +57,34 @@ void Particle_Initialize(struct Particle* obj, AliveOrFinish a,
 
 	obj->w = W;
 	obj->h = H;
-
-	obj->Velocity.x = 0;
+	obj->RL = CP_Random_RangeInt(0, 2);
+	obj->Velocity.x = (obj->RL ? -1 : 1) * (float)INIT_VELOCITY_X;
 	obj->Velocity.y = -1 *(float)INIT_VELOCITY_Y;
 
-	obj->Acceleration.x = 0;
+	obj->Acceleration.x = (float)((obj->RL ? -1 : 1) * 10);
 	obj->Acceleration.y = -100;
+	if (a == Alive) {
+		loc[particle_cnt] = obj->Pos;
+		particle_cnt++;
+	}
 
 	Particle_SetRandomGoal(obj);
+}
+Particle* Particle_Generate(struct Particle* obj, AliveOrFinish a, Vec2d loc_) {
+	Particle* output = MemPool_GetFirstDeadObj(gMemoryPool);;
+	Particle_Initialize(output, a, loc_.x, loc_.y, obj->w, obj->h, obj->color);
+	output->Target.x = obj->Target.x;
+	output->Target.y = obj->Target.y;
+	output->Start = loc_;
+	output->accumulatedLifeSpanTime = 0;
+	output->accumulatedTime = 0;
+
+	output->Velocity.x = (obj->RL ? -1 : 1) * (float)INIT_VELOCITY_X;
+	output->Velocity.y = -1 * (float)INIT_VELOCITY_Y;
+	output->Acceleration.x = (float)((obj->RL ? -1 : 1) * 10);
+	output->Acceleration.y = -100;
+	output->maxLifeSpanTime = obj->maxLifeSpanTime;
+	return output;
 }
 
 void Particle_Draw(const Particle* obj)
@@ -65,6 +93,7 @@ void Particle_Draw(const Particle* obj)
 		return;
 
 	CP_Settings_Fill(obj->color);
+	CP_Settings_NoStroke();
 	CP_Graphics_DrawRect(obj->Pos.x, obj->Pos.y, obj->w, obj->h);
 }
 
@@ -85,8 +114,8 @@ void Particle_Movement_Linear(Particle* obj)
 }
 
 void ShowInfo(Particle* obj) {
-	CP_Settings_Fill(CP_Color_Create(0, 0, 0, 255));
-	CP_Settings_TextSize(10);
+	CP_Settings_Fill(CP_Color_Create(255, 255, 255, 255));
+	CP_Settings_TextSize(TEXTSIZE);
 	char buffer[200];
 	sprintf_s(buffer, 200, "FPS : %f\nVelocity (Y) : %f", CP_System_GetFrameRate(), obj->Velocity.y);
 	CP_Font_DrawText(&buffer[0], 10, 10);
@@ -96,7 +125,6 @@ void Particle_Update(Particle* obj)
 {
 	if (obj == NULL)
 		return;
-	ShowInfo(obj);
 	Particle_Movement_Gravity(obj);
 
 	obj->accumulatedLifeSpanTime += CP_System_GetDt();
@@ -119,21 +147,11 @@ void Particle_Movement_Gravity(Particle* obj)
 		if (obj->Acceleration.y > 0)
 		{
 			obj->Velocity.y = obj->Velocity.y - obj->Acceleration.y * t;
-			obj->explosion = Before;
-		}
-		else
-		{
-			if (obj->explosion == Before)
-			{
-				obj->Velocity.y = 0;
-				obj->explosion = After;
-			}
 		}
 	}
 	else
 	{
 		obj->Velocity.y = obj->Velocity.y - obj->Acceleration.y * t;
-		obj->explosion = Before;
 	}
 
 	//Update my position, depending on the velocity
@@ -181,6 +199,12 @@ void Particle_KillObject(Particle* obj)
 		return;
 
 	obj->alive = Finish;
+}
+
+void Particle_AddVelocity(Particle* obj, float x, float y)
+{
+	obj->Velocity.x += x;
+	obj->Velocity.y += y;
 }
 
 void Particle_AddAcceleration(Particle* obj, float x, float y)
@@ -271,6 +295,8 @@ struct Particle* MemPool_GetFirstDeadObj(struct MemoryPool* pMemPool)
 {
 	if (pMemPool == NULL)
 		return NULL;
+
+	
 	int i = 0;
 	for (i = 0; i < pMemPool->TotalSize; i++)
 	{
@@ -281,6 +307,11 @@ struct Particle* MemPool_GetFirstDeadObj(struct MemoryPool* pMemPool)
 	}
 
 	return NULL;
+}
+
+void Clear_Background() {
+	CP_Color color_black = CP_Color_Create(0, 0, 0, 255);
+	CP_Graphics_ClearBackground(color_black);
 }
 
 // Cycle Functions
@@ -297,41 +328,62 @@ void Firework_State_init(void)
 		gMemoryPool->AllObjects = NULL;
 	}
 
-	MemPool_AllocateMemory(gMemoryPool, MAX_PARTICLES);
+	MemPool_AllocateMemory(gMemoryPool, MAX_PARTICLES2);
 	MemPool_InitializeMemory(gMemoryPool);
 
+	object[0] = MemPool_GetFirstDeadObj(gMemoryPool);
+	explosion_loc.x = 0;
+	explosion_loc.y = 0;
+	explosion = Before;
+	particle_cnt = 0;
 	//Create the player
-	Particle_InitializeRandom(MemPool_GetFirstDeadObj(gMemoryPool), Alive);
-
-	CP_Color color_white = CP_Color_Create(255, 255, 255, 255);
-	CP_Graphics_ClearBackground(color_white);
+	Particle_InitializeRandom(object[0], Alive);
+	Clear_Background();
 }
+
 void Firework_State_update(void)
 {
-
 	if (CP_Input_KeyTriggered(KEY_P)) {
 		exit(0);
+	}
+	interval_check += CP_System_GetDt();
+	ShowInfo(object[0]);
+	if (object[0]->alive == Finish) {
+		explosion_loc = object[0]->Pos;
+		explosion = After;
 	}
 	if (CP_Input_KeyTriggered(KEY_R))
 	{
 		CP_Engine_SetNextGameStateForced(Firework_State_init, Firework_State_update, Firework_State_exit);
-	}
-	if (CP_Input_KeyTriggered(KEY_SPACE))
-	{
-		struct Particle* obj = MemPool_GetFirstDeadObj(gMemoryPool);
-		if (obj != NULL)
-		{
-			Particle_InitializeRandom(obj, Alive);
-		}
 	}
 	if (CP_Input_KeyTriggered(KEY_DELETE))
 	{
 		MemPool_DeleteAll(gMemoryPool);
 	}
 
+	if (explosion) {
+		// logic..
+	}
+	
+	if (interval_check > PARTICLE_INTERVAL) {
+		if (particle_cnt < MAX_PARTICLES1)
+		{
+			loc[particle_cnt] = object[0]->Pos;
+			object[particle_cnt] = Particle_Generate(object[0], Alive, loc[particle_cnt - 1]);
+		}
+		else {
+			for (int i = 2; i < MAX_PARTICLES1; i++) {
+				object[i - 1] = object[i];
+			}
+		}
+		interval_check = 0;
+	}
+	
 	MemPool_UpdateAllObjects(gMemoryPool);
 
 	MemPool_DrawAllObjects(gMemoryPool);
+
+	Clear_Background();
 }
 
 void Firework_State_exit(void)

@@ -23,7 +23,7 @@ enum ExplosionState
 struct Vec2d {
 	float x;
 	float y;
-};
+}typedef Vec2d;
 
 struct Particle {
 
@@ -36,10 +36,11 @@ struct Particle {
 	struct Vec2d Acceleration;
 
 	AliveOrFinish alive;
-	ExplosionState explosion;
 
 	struct Vec2d Start;
 	struct Vec2d Target;
+
+	int RL; 
 
 	float w;
 	float h;
